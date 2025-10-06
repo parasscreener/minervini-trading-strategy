@@ -1,0 +1,192 @@
+name: 📊 Minervini Trading Strategy - Daily Screening
+
+on:
+  schedule:
+    # Run Monday to Friday at 9:30 AM IST (4:00 AM UTC)
+    # IST is UTC+5:30, so 9:30 AM IST = 4:00 AM UTC
+    - cron: '0 4 * * 1-5'
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      force_backtest:
+        description: 'Force run backtesting (normally runs only on Mondays)'
+        required: false
+        default: 'false'
+        type: boolean
+      test_mode:
+        description: 'Run in test mode with limited data'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  # Email configuration
+  SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+  SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+  RECIPIENT_EMAIL: paras.m.parmar@gmail.com
+
+  # Runtime configuration
+  FORCE_BACKTEST: ${{ github.event.inputs.force_backtest || 'false' }}
+  TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
+
+jobs:
+  trading-analysis:
+    name: 🎯 Run Minervini Stock Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 45  # Prevent infinite runs
+
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Setup Python Environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'  # Changed to 3.10 for better numpy compatibility
+        cache: 'pip'
+
+    - name: 📦 Install System Dependencies
+      run: |
+        # Update package list
+        sudo apt-get update
+
+        # Install build tools for TA-Lib
+        sudo apt-get install -y build-essential wget
+
+    - name: 🔧 Install TA-Lib C Library
+      run: |
+        # Download and install TA-Lib C library
+        cd /tmp
+        wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+        tar -xzf ta-lib-0.4.0-src.tar.gz
+        cd ta-lib/
+        ./configure --prefix=/usr/local
+        make
+        sudo make install
+        sudo ldconfig
+
+    - name: 📋 Install Python Dependencies
+      run: |
+        # Upgrade pip
+        python -m pip install --upgrade pip
+
+        # Install packages from requirements.txt
+        pip install -r requirements.txt
+
+        # Install TA-Lib Python wrapper separately
+        pip install TA-Lib
+
+    - name: 🔍 Verify Installation
+      run: |
+        echo "🔍 Verifying Python environment..."
+        python --version
+
+        echo "📦 Testing core libraries..."
+        python -c "import pandas as pd; print(f'✅ pandas {pd.__version__}')"
+        python -c "import numpy as np; print(f'✅ numpy {np.__version__}')"
+        python -c "import yfinance as yf; print('✅ yfinance installed')"
+        python -c "import requests; print('✅ requests installed')"
+
+        echo "📊 Testing TA-Lib..."
+        python -c "import talib; print(f'✅ TA-Lib installed successfully')"
+
+        echo "📧 Testing email modules..."
+        python -c "import smtplib, ssl; print('✅ Email modules available')"
+
+    - name: 🚀 Run Trading Strategy Analysis
+      id: analysis
+      run: |
+        echo "📊 Starting Mark Minervini Trading Strategy Analysis"
+        echo "⏰ Current time: $(date)"
+        echo "🌏 Timezone: $(timedatectl show --property=Timezone --value 2>/dev/null || echo 'UTC')"
+
+        # Set execution mode based on inputs
+        if [ "${{ env.TEST_MODE }}" = "true" ]; then
+          echo "🧪 Running in TEST mode"
+          python main.py --test
+        else
+          echo "🎯 Running PRODUCTION analysis"
+          python main.py
+        fi
+
+    - name: 📧 Verify Email Configuration
+      if: always()
+      run: |
+        echo "📧 Email configuration check:"
+        echo "Sender configured: $(if [ -n '${{ secrets.SENDER_EMAIL }}' ]; then echo 'Yes'; else echo 'No'; fi)"
+        echo "Password configured: $(if [ -n '${{ secrets.SENDER_PASSWORD }}' ]; then echo 'Yes'; else echo 'No'; fi)"
+        echo "Recipient: ${{ env.RECIPIENT_EMAIL }}"
+
+    - name: 🔄 Weekly Backtest Report
+      if: github.event.schedule == '0 4 * * 1' || env.FORCE_BACKTEST == 'true'
+      run: |
+        echo "📊 Running weekly comprehensive backtesting..."
+        python main.py --backtest-only
+
+    - name: 💾 Upload Analysis Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: trading-analysis-${{ github.run_id }}
+        path: |
+          *.csv
+          *.txt
+          *.log
+        retention-days: 30
+
+    - name: 📊 Execution Summary
+      if: always()
+      run: |
+        echo "📈 EXECUTION SUMMARY"
+        echo "==================="
+        echo "🕐 Execution Time: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+        echo "📧 Target Email: ${{ env.RECIPIENT_EMAIL }}"
+        echo "🎯 Strategy: Mark Minervini SEPA"
+        echo "📊 Market: Indian Nifty 750 stocks"
+        echo "🐍 Python Version: $(python --version)"
+
+        # Check if any CSV files were generated
+        if ls *.csv 1> /dev/null 2>&1; then
+          echo "✅ Analysis files generated:"
+          ls -la *.csv 2>/dev/null || echo "No CSV files found"
+        else
+          echo "⚠️ No CSV files generated"
+        fi
+
+        # System resource usage
+        echo ""
+        echo "💻 System Resources:"
+        echo "Memory usage: $(free -h | awk '/^Mem:/ { print $3 "/" $2 }' 2>/dev/null || echo 'N/A')"
+        echo "Disk usage: $(df -h . | awk 'NR==2 { print $3 "/" $2 }' 2>/dev/null || echo 'N/A')"
+
+  # Notification job for failures
+  notify-failure:
+    name: 📧 Send Failure Notification  
+    needs: trading-analysis
+    runs-on: ubuntu-latest
+    if: failure()
+
+    steps:
+    - name: 🚨 Send Error Notification
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 587
+        username: ${{ secrets.SENDER_EMAIL }}
+        password: ${{ secrets.SENDER_PASSWORD }}
+        subject: 🚨 Trading Strategy Failed - ${{ github.run_id }}
+        to: paras.m.parmar@gmail.com
+        from: ${{ secrets.SENDER_EMAIL }}
+        body: |
+          🚨 TRADING STRATEGY EXECUTION FAILED
+
+          Repository: ${{ github.repository }}
+          Run ID: ${{ github.run_id }}
+          Trigger: ${{ github.event_name }}
+          Time: ${{ github.event.created_at }}
+
+          Please check the GitHub Actions logs for details:
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          This is an automated failure notification.
