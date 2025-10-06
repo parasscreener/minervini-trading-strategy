@@ -1,0 +1,46 @@
+---
+name: 🧪 Test Trading Strategy
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_stocks:
+        description: 'Number of stocks to test (default: 10)'
+        required: false
+        default: '10'
+
+jobs:
+  test-strategy:
+    name: 🧪 Quick Strategy Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: 📦 Install Dependencies
+      run: |
+        pip install pandas numpy yfinance requests python-dotenv
+
+    - name: 🧪 Run Quick Test
+      run: |
+        echo "🧪 Testing with ${{ github.event.inputs.test_stocks }} stocks"
+        python -c "
+        from data_fetcher import DataFetcher
+        from screener import MinerviniScreener
+
+        # Quick test
+        fetcher = DataFetcher()
+        test_symbols = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS']
+        data = fetcher.fetch_multiple_stocks(test_symbols, period='6mo')
+        print(f'✅ Fetched data for {len(data)} stocks')
+
+        screener = MinerviniScreener()
+        results = screener.screen_stocks(data)
+        print(f'✅ Generated {len(results)} signals')
+        "
